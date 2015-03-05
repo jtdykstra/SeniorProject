@@ -5,20 +5,32 @@
 
 #define NUM_ADC 7
 
-#define LEFT_MOTOR_RED_WIRE 0x20 //PORT B
-#define LEFT_MOTOR_BLACK_WIRE 0x10 //PORT B
-#define RIGHT_MOTOR_RED_WIRE 0x08 //PORT B
-#define RIGHT_MOTOR_BLACK_WIRE 0x04 //PORT B
-#define BEAM_BREAK_INPUT 0x01 //PORTB
-#define PWM_PIN 0x02 //PORTB
+//PORTB
+#define LEFT_MOTOR_RED_WIRE 0x20 
+#define LEFT_MOTOR_BLACK_WIRE 0x10
+#define RIGHT_MOTOR_RED_WIRE 0x08 
+#define RIGHT_MOTOR_BLACK_WIRE 0x04
+#define BEAM_BREAK_INPUT 0x01
+#define PWM_PIN 0x02 
 
-#define LINE_SENSOR_ONE 0x10 //Analog port 
-#define LINE_SENSOR_TWO 0x20 //Analog port
+//Analog port
+#define INNER_LEFT_LINE_SENSOR 0 
+#define MIDDLE_LINE_SENSOR 1
+#define INNER_RIGHT_LINE_SENSOR 2
+#define OUTER_LEFT_LINE_SENSOR 3
+#define OUTER_RIGHT_LINE_SENSOR 4
 
-#define RACK_MOTOR_RED 0x80 //PORTD
-#define RACK_MOTOR_BLACK 0x40 //PORTD
-#define DIG_LINE_SENSOR_ONE 0x20 //PORTD
-#define DIG_LINE_SENSOR_TWO 0x10 //PORTD 
+//PORT D
+#define RACK_MOTOR_RED 0x80 
+#define RACK_MOTOR_BLACK 0x40 
+#define DIG_LINE_SENSOR_RIGHT 0x20
+#define DIG_LINE_SENSOR_LEFT 0x10 
+
+#define THRESHOLD 200 //analog line senosr
+
+#define BLACK_THRESHOLD 400 //digital sensors
+#define WHITE_THRESHOLD 100
+
 
 typedef struct adcData { 
    uint16_t len;
@@ -38,12 +50,16 @@ void ReadAllADCValues(adcData *data);
 void MoveClawUp();
 void MoveClawDown(); 
 uint32_t ReadDigLineSensor(uint8_t port);
+void MoveLeftWheelTicks(int ticks);
+void MoveRightWheelTicks(int ticks);
+void MoveForwardTicks(int ticks);
+void MoveForwardTick();
 
 int main(void)
 {
    serial_init(); 
    DDRB = PWM_PIN | LEFT_MOTOR_RED_WIRE | LEFT_MOTOR_BLACK_WIRE | RIGHT_MOTOR_RED_WIRE | RIGHT_MOTOR_BLACK_WIRE; 
-   DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_ONE; 
+   DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT; 
    SetupClaw(); 
 
    //ADC setup. Lookup settings in the manual to tweak. 
@@ -53,29 +69,164 @@ int main(void)
    ADCSRA |= (1 << ADEN) | (1 << ADIE); //Enable ADC   
 
    adcData data; 
-   data.len = 3; 
+   data.len = 7; 
+
+   int state = 0; 
 
    while (1)
-   {
-      print_int32(ReadDigLineSensor(DIG_LINE_SENSOR_ONE)); 
-      print_string("****"); 
-      /*ReadAllADCValues(&data); 
-         LeftWheelForward();
-         RightWheelForward(); 
+   {  
+      ReadAllADCValues(&data);
+      /*print_int(data.readings[MIDDLE_LINE_SENSOR]);
+      print_string("   "); 
+      print_int(data.readings[OUTER_RIGHT_LINE_SENSOR]);
+      print_string("   ");
+      print_string("\r\n\r\n");
+      _delay_ms(1000); 
+*/
+      if (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && 
+            data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD &&
+              state == 0)
+      {
+        state = 1; 
+        
+      } 
 
-      if (data.readings[0] > 200)
+
+      switch(state) 
       {
-         StopLeftWheel(); 
-         _delay_ms(55); 
-      }
-      else if (data.readings[2] > 200)
-      {
-         StopRightWheel(); 
-         _delay_ms(55); 
-      } */
+         case 0: //follow the line
+            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopLeftWheel();
+               _delay_ms(30); 
+            }
+
+            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopRightWheel();
+               _delay_ms(30);
+            }
+
+            LeftWheelForward();
+            RightWheelForward();
+            break;
+         case 1: //move claw to rings
+            LeftWheelReverse();
+            RightWheelReverse();
+            _delay_ms(30);
+            StopLeftWheel();
+            StopRightWheel();
+            _delay_ms(1000);
+            MoveForwardTicks(3); 
+            state = 2; 
+            break;
+         case 2:
+            RightWheelForward(); 
+            LeftWheelReverse(); 
+            while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
+               ReadAllADCValues(&data);
+                
+            
+            RightWheelReverse(); 
+            LeftWheelForward();
+            _delay_ms(50);
+            StopRightWheel();
+            StopLeftWheel();
+            state = 3;
+            break;
+         case 3:
+            MoveForwardTicks(8); 
+            RightWheelReverse();
+            LeftWheelForward();
+            while (data.readings[INNER_RIGHT_LINE_SENSOR] < THRESHOLD)
+               ReadAllADCValues(&data); 
+            RightWheelForward();
+            LeftWheelReverse();
+            _delay_ms(50);
+            StopRightWheel();
+            StopLeftWheel();
+            state = 4; 
+            break;
+         default:
+             
+            break;
+      } 
+
    }
 } 
 
+void MoveLeftWheelTicks(int ticks)
+{
+   int count = 0;
+   uint32_t reading = 0; 
+
+   LeftWheelForward();
+   _delay_ms(50); 
+ 
+   for (; count <= ticks; ++count)
+   {  
+      while (reading < BLACK_THRESHOLD) //go to black line
+      {
+         reading = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
+      } 
+   } 
+   
+   LeftWheelReverse();
+   _delay_ms(10); 
+   StopLeftWheel(); 
+}
+
+void MoveRightWheelTicks(int ticks)
+{
+   int count = 0;
+   uint32_t reading = 0; 
+
+   RightWheelForward();
+   _delay_ms(50); 
+ 
+   for (; count <= ticks; ++count)
+   {  
+      while (reading < BLACK_THRESHOLD) //go to black line
+      {
+         reading = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+      } 
+   } 
+   
+   RightWheelReverse();
+   _delay_ms(10); 
+   StopRightWheel(); 
+}
+
+
+void MoveForwardTicks(int ticks)
+{
+   int count = 0;
+   for (count = 0; count <= ticks; ++count)
+      MoveForwardTick(); 
+}
+
+void MoveForwardTick()
+{
+   int count = 0;
+   uint32_t reading = 0; 
+  
+         LeftWheelForward();
+         RightWheelForward(); 
+         _delay_ms(50); 
+
+         while (reading < BLACK_THRESHOLD) //go to black line
+         {
+            reading = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+         }  
+           
+         RightWheelReverse(); 
+         LeftWheelReverse();
+         _delay_ms(10); 
+         StopLeftWheel(); 
+         StopRightWheel(); 
+   
+}
+      
 uint32_t ReadDigLineSensor(uint8_t port)
 {  
    uint32_t count = 0;
