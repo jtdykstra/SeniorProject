@@ -1,35 +1,41 @@
 //Steve's soul, author: Jordan Dykstra, Robert Prosser, Anibal Hernandez
 #include <avr/io.h>
 #include <util/delay.h>
+#include <avr/interrupt.h>
 #include "serial.c"
 
 #define NUM_ADC 7
 
 //PORTB
-#define LEFT_MOTOR_RED_WIRE 0x20 
-#define LEFT_MOTOR_BLACK_WIRE 0x10
-#define RIGHT_MOTOR_RED_WIRE 0x08 
-#define RIGHT_MOTOR_BLACK_WIRE 0x04
-#define BEAM_BREAK_INPUT 0x01
-#define PWM_PIN 0x02 
+#define LEFT_MOTOR_RED_WIRE 0x20      //Pin 13 
+#define LEFT_MOTOR_BLACK_WIRE 0x10    //Pin 12
+#define RIGHT_MOTOR_RED_WIRE 0x08     //Pin 11
+#define RIGHT_MOTOR_BLACK_WIRE 0x04   //Pin 10
+#define BEAM_BREAK_INPUT 0x01         //Pin 8
+#define PWM_PIN 0x02                  //Pin 9
 
 //Analog port
-#define INNER_LEFT_LINE_SENSOR 0 
-#define MIDDLE_LINE_SENSOR 1
-#define INNER_RIGHT_LINE_SENSOR 2
-#define OUTER_LEFT_LINE_SENSOR 3
-#define OUTER_RIGHT_LINE_SENSOR 4
+#define INNER_LEFT_LINE_SENSOR 0      //Analog pin 0
+#define MIDDLE_LINE_SENSOR 1          //Analog pin 1
+#define INNER_RIGHT_LINE_SENSOR 2     //Analog pin 2
+#define OUTER_LEFT_LINE_SENSOR 3      //Analog pin 3
+#define OUTER_RIGHT_LINE_SENSOR 4     //Analog pin 4
 
 //PORT D
-#define RACK_MOTOR_RED 0x80 
-#define RACK_MOTOR_BLACK 0x40 
-#define DIG_LINE_SENSOR_RIGHT 0x20
-#define DIG_LINE_SENSOR_LEFT 0x10 
+#define RACK_MOTOR_RED 0x80           //Pin 7 
+#define RACK_MOTOR_BLACK 0x40         //Pin 6
+#define DIG_LINE_SENSOR_RIGHT 0x20    //Pin 4
+#define DIG_LINE_SENSOR_LEFT 0x10     //Pin 5
 
-#define THRESHOLD 200 //analog line senosr
+//Analog sensors
+#define THRESHOLD 200                 
 
-#define BLACK_THRESHOLD 400 //digital sensors
+//Digital sensors
+#define BLACK_THRESHOLD 400  
 #define WHITE_THRESHOLD 100
+
+//Interrupt counts for specific motor speeds
+#define MOTOR_SPEED_1 16 //500 HZ  
 
 
 typedef struct adcData { 
@@ -55,6 +61,21 @@ void MoveRightWheelTicks(int ticks);
 void MoveForwardTicks(int ticks);
 void MoveForwardTick();
 
+static volatile uint16_t isrCount = 0;
+static volatile uint16_t speed = 8;//MOTOR_SPEED_1;  
+
+ISR(TIMER0_COMPA_vect) {
+   ++isrCount; 
+
+   if (isrCount == speed)
+   {
+      //Toggle necessary voltage here     
+      PORTB ^= LEFT_MOTOR_RED_WIRE; 
+      print_string("Toggle!\r\n");
+      isrCount = 0; 
+   } 
+}
+
 int main(void)
 {
    serial_init(); 
@@ -68,21 +89,32 @@ int main(void)
    ADMUX |= (1 << ADLAR); //Put highest 8 bits into the ADCH register
    ADCSRA |= (1 << ADEN) | (1 << ADIE); //Enable ADC   
 
+   //Setup the interrupt timer
+   TIMSK0 = (1 << OCIE2A); //enable timer 2 interrupts
+   TCNT0 = 0; //initialize count to 0
+   TCCR0A = (1 << OCIE2A);//(1 << WGM21); //CTC mode
+   TCCR0B = 0x02;//(1 << CS02) | (1 << CS00); //Prescaler
+   OCR0A = 250; 
+
    adcData data; 
    data.len = 7; 
 
    int state = 0; 
 
+   sei(); 
    while (1)
    {  
+     /* if (dog)
+         print_string("AHHHH\r\n"); 
+
       ReadAllADCValues(&data);
-      /*print_int(data.readings[MIDDLE_LINE_SENSOR]);
+      print_int(data.readings[MIDDLE_LINE_SENSOR]);
       print_string("   "); 
       print_int(data.readings[OUTER_RIGHT_LINE_SENSOR]);
       print_string("   ");
       print_string("\r\n\r\n");
       _delay_ms(1000); 
-*/
+
       if (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD &&
               state == 0)
@@ -125,8 +157,7 @@ int main(void)
             LeftWheelReverse(); 
             while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
                ReadAllADCValues(&data);
-                
-            
+                 
             RightWheelReverse(); 
             LeftWheelForward();
             _delay_ms(50);
@@ -151,7 +182,7 @@ int main(void)
              
             break;
       } 
-
+      */
    }
 } 
 
