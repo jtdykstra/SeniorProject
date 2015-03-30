@@ -7,7 +7,7 @@ program_5: steve.c
 #Be sure to change the device (the argument after -P) to match the device on your  computer
 #On Windows, change the argument after -P to appropriate COM port
 program: steve.hex
-	avrdude -pm328p -P /dev/ttyACM2 -c arduino -F -u -U flash:w:steve.hex
+	avrdude -pm328p -P /dev/ttyACM0 -c arduino -F -u -U flash:w:steve.hex
 							  
 #remove build files
 clean:

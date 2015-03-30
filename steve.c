@@ -25,10 +25,15 @@
 #define RACK_MOTOR_RED 0x80           //Pin 7 
 #define RACK_MOTOR_BLACK 0x40         //Pin 6
 #define DIG_LINE_SENSOR_RIGHT 0x20    //Pin 4
-#define DIG_LINE_SENSOR_LEFT 0x10     //Pin 5
+#define DIG_LINE_SENSOR_LEFT 0x10    //Pin 5
 
 //Analog sensors
-#define THRESHOLD 200                 
+#define THRESHOLD 120                 
+#define OUTER_LEFT_THRESH 150
+#define INNER_LEFT_THRESH 150
+#define MIDDLE_THRESH 150
+#define INNER_RIGHT_THRESH 150
+#define OUTER_RIGHT_THRESH 150
 
 //Digital sensors
 #define BLACK_THRESHOLD 400  
@@ -36,7 +41,6 @@
 
 //Interrupt counts for specific motor speeds
 #define MOTOR_SPEED_1 16 //500 HZ  
-
 
 typedef struct adcData { 
    uint16_t len;
@@ -62,18 +66,20 @@ void MoveForwardTicks(int ticks);
 void MoveForwardTick();
 
 static volatile uint16_t isrCount = 0;
-static volatile uint16_t speed = 8;//MOTOR_SPEED_1;  
+static volatile uint16_t speed = 1; 
+static uint8_t leftWheelToggle = 0; 
+static uint8_t rightWheelToggle = 0; 
 
-ISR(TIMER0_COMPA_vect) {
-   ++isrCount; 
-
-   if (isrCount == speed)
+ISR(TIMER2_COMPA_vect) {
+   if (++isrCount == speed)
    {
-      //Toggle necessary voltage here     
-      PORTB ^= LEFT_MOTOR_RED_WIRE; 
-      print_string("Toggle!\r\n");
-      isrCount = 0; 
-   } 
+      PORTB ^= (leftWheelToggle | rightWheelToggle);  
+      isrCount = 0;
+   }
+}
+
+ISR(BADISR_vect) {
+   print_string("bad isr!\r\n");
 }
 
 int main(void)
@@ -81,48 +87,56 @@ int main(void)
    serial_init(); 
    DDRB = PWM_PIN | LEFT_MOTOR_RED_WIRE | LEFT_MOTOR_BLACK_WIRE | RIGHT_MOTOR_RED_WIRE | RIGHT_MOTOR_BLACK_WIRE; 
    DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT; 
-   SetupClaw(); 
+   //SetupClaw(); 
 
    //ADC setup. Lookup settings in the manual to tweak. 
    ADCSRA = (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //set the ADC prescaler to 128
    ADMUX = (1 << REFS0); //Set reference voltage to AVCC
    ADMUX |= (1 << ADLAR); //Put highest 8 bits into the ADCH register
-   ADCSRA |= (1 << ADEN) | (1 << ADIE); //Enable ADC   
+   ADCSRA |= (1 << ADEN); //Enable ADC   
 
    //Setup the interrupt timer
-   TIMSK0 = (1 << OCIE2A); //enable timer 2 interrupts
-   TCNT0 = 0; //initialize count to 0
-   TCCR0A = (1 << OCIE2A);//(1 << WGM21); //CTC mode
-   TCCR0B = 0x02;//(1 << CS02) | (1 << CS00); //Prescaler
-   OCR0A = 250; 
+   TIMSK2 = (1 << OCIE2A); //enable timer 2 interrupts
+   TCNT2 = 0; //initialize count to 0
+   TCCR2A = (1 << WGM21); //CTC mode
+   TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); //Prescaler
+   OCR2A = 250; 
 
    adcData data; 
    data.len = 7; 
 
    int state = 0; 
-
-   sei(); 
+   uint32_t leftDig = 0;
+   uint32_t rightDig = 0;
+   sei();
    while (1)
    {  
-     /* if (dog)
-         print_string("AHHHH\r\n"); 
-
       ReadAllADCValues(&data);
+    /*  rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+      leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
+      set_cursor(0,0);
+      print_int(data.readings[OUTER_LEFT_LINE_SENSOR]);
+      print_string("***");
+      print_int(data.readings[INNER_LEFT_LINE_SENSOR]);
+      print_string("***");
       print_int(data.readings[MIDDLE_LINE_SENSOR]);
-      print_string("   "); 
+      print_string("***");
+      print_int(data.readings[INNER_RIGHT_LINE_SENSOR]);
+      print_string("***");
       print_int(data.readings[OUTER_RIGHT_LINE_SENSOR]);
-      print_string("   ");
       print_string("\r\n\r\n");
-      _delay_ms(1000); 
+      print_int32(leftDig);
+      print_string("----");
+      print_int32(rightDig); 
+      _delay_ms(500);
+      clear_screen(); */
 
       if (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD &&
               state == 0)
       {
-        state = 1; 
-        
+        state = 1;   
       } 
-
 
       switch(state) 
       {
@@ -130,22 +144,19 @@ int main(void)
             if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
             {  
                StopLeftWheel();
-               _delay_ms(30); 
+               _delay_ms(75); 
             }
 
             if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
-               _delay_ms(30);
+               _delay_ms(75);
             }
 
             LeftWheelForward();
             RightWheelForward();
             break;
-         case 1: //move claw to rings
-            LeftWheelReverse();
-            RightWheelReverse();
-            _delay_ms(30);
+         case 1: 
             StopLeftWheel();
             StopRightWheel();
             _delay_ms(1000);
@@ -155,25 +166,22 @@ int main(void)
          case 2:
             RightWheelForward(); 
             LeftWheelReverse(); 
-            while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
+            ReadAllADCValues(&data); 
+            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
                ReadAllADCValues(&data);
-                 
-            RightWheelReverse(); 
-            LeftWheelForward();
-            _delay_ms(50);
+            _delay_ms(100); 
             StopRightWheel();
             StopLeftWheel();
             state = 3;
             break;
          case 3:
-            MoveForwardTicks(8); 
+            MoveForwardTicks(5); 
             RightWheelReverse();
             LeftWheelForward();
-            while (data.readings[INNER_RIGHT_LINE_SENSOR] < THRESHOLD)
+            ReadAllADCValues(&data); 
+            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
                ReadAllADCValues(&data); 
-            RightWheelForward();
-            LeftWheelReverse();
-            _delay_ms(50);
+            _delay_ms(100); 
             StopRightWheel();
             StopLeftWheel();
             state = 4; 
@@ -181,8 +189,7 @@ int main(void)
          default:
              
             break;
-      } 
-      */
+      }
    }
 } 
 
@@ -228,7 +235,6 @@ void MoveRightWheelTicks(int ticks)
    StopRightWheel(); 
 }
 
-
 void MoveForwardTicks(int ticks)
 {
    int count = 0;
@@ -241,20 +247,17 @@ void MoveForwardTick()
    int count = 0;
    uint32_t reading = 0; 
   
-         LeftWheelForward();
-         RightWheelForward(); 
-         _delay_ms(50); 
+   LeftWheelForward();
+   RightWheelForward(); 
+   _delay_ms(150); 
 
-         while (reading < BLACK_THRESHOLD) //go to black line
-         {
-            reading = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-         }  
-           
-         RightWheelReverse(); 
-         LeftWheelReverse();
-         _delay_ms(10); 
-         StopLeftWheel(); 
-         StopRightWheel(); 
+   while (reading < BLACK_THRESHOLD) //go to black line
+   {
+      reading = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
+   }  
+     
+   StopLeftWheel(); 
+   StopRightWheel(); 
    
 }
       
@@ -314,12 +317,10 @@ void ReadAllADCValues(adcData *data)
       ADMUX &= ~(0xF); //clear lower 4 bits, which are the mux values
       ADMUX |= ind; //set the correct mux value 
       ADCSRA |= (1 << ADSC); //Start measuring! 
-      
-      while (!(ADCSRA & (1 << ADIF)))  //wait for measurement to complete
+      while (ADCSRA & (1 << ADSC))  //wait for measurement to complete
          ;
-
       data->readings[ind] = ADCH; //add the reading to the data
-      ADCSRA &= ~(1 << ADIF); //clear interrupt flag 
+      //ADCSRA &= ~(1 << ADIF); //clear interrupt flag 
       ++ind;
    } 
 } 
@@ -360,36 +361,38 @@ void StopClawOutput()
 
 void LeftWheelForward()
 {
-    PORTB |= LEFT_MOTOR_RED_WIRE; //drive red wire high
+    leftWheelToggle = LEFT_MOTOR_RED_WIRE; //drive red wire high
     PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); //drive black wire low
 }
 
 void LeftWheelReverse()
 {
-    PORTB |= LEFT_MOTOR_BLACK_WIRE; 
+    leftWheelToggle = LEFT_MOTOR_BLACK_WIRE; 
     PORTB &= ~(LEFT_MOTOR_RED_WIRE); 
 }
 
 void RightWheelForward()
 {
-    PORTB |= RIGHT_MOTOR_RED_WIRE;
+    rightWheelToggle = RIGHT_MOTOR_RED_WIRE;
     PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); 
 }
 
 void RightWheelReverse()
 {
-   PORTB |= RIGHT_MOTOR_BLACK_WIRE;
+   rightWheelToggle = RIGHT_MOTOR_BLACK_WIRE; 
    PORTB &= ~(RIGHT_MOTOR_RED_WIRE); 
 }
 
 void StopLeftWheel()
 {
+   leftWheelToggle = 0; 
    PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); 
    PORTB &= ~(LEFT_MOTOR_RED_WIRE); 
 }
 
 void StopRightWheel()
 {
+   rightWheelToggle = 0; 
    PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); 
    PORTB &= ~(RIGHT_MOTOR_RED_WIRE); 
 }
