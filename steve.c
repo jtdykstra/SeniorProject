@@ -28,7 +28,7 @@
 #define DIG_LINE_SENSOR_LEFT 0x10    //Pin 5
 
 //Analog sensors
-#define THRESHOLD 120                 
+#define THRESHOLD 200                 
 #define OUTER_LEFT_THRESH 150
 #define INNER_LEFT_THRESH 150
 #define MIDDLE_THRESH 150
@@ -64,9 +64,10 @@ void MoveLeftWheelTicks(int ticks);
 void MoveRightWheelTicks(int ticks);
 void MoveForwardTicks(int ticks);
 void MoveForwardTick();
+uint32_t AvgReadDigLineSensor(uint8_t port);
 
 static volatile uint16_t isrCount = 0;
-static volatile uint16_t speed = 1; 
+static volatile uint16_t speed = 4; 
 static uint8_t leftWheelToggle = 0; 
 static uint8_t rightWheelToggle = 0; 
 
@@ -100,7 +101,7 @@ int main(void)
    TCNT2 = 0; //initialize count to 0
    TCCR2A = (1 << WGM21); //CTC mode
    TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); //Prescaler
-   OCR2A = 250; 
+   OCR2A = 255; 
 
    adcData data; 
    data.len = 7; 
@@ -112,7 +113,7 @@ int main(void)
    while (1)
    {  
       ReadAllADCValues(&data);
-    /*  rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+/*      rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
       leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
       set_cursor(0,0);
       print_int(data.readings[OUTER_LEFT_LINE_SENSOR]);
@@ -129,7 +130,7 @@ int main(void)
       print_string("----");
       print_int32(rightDig); 
       _delay_ms(500);
-      clear_screen(); */
+      clear_screen();*/
 
       if (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD &&
@@ -137,7 +138,8 @@ int main(void)
       {
         state = 1;   
       } 
-
+ 
+ 
       switch(state) 
       {
          case 0: //follow the line
@@ -160,7 +162,7 @@ int main(void)
             StopLeftWheel();
             StopRightWheel();
             _delay_ms(1000);
-            MoveForwardTicks(3); 
+            MoveForwardTicks(6); 
             state = 2; 
             break;
          case 2:
@@ -169,19 +171,17 @@ int main(void)
             ReadAllADCValues(&data); 
             while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
                ReadAllADCValues(&data);
-            _delay_ms(100); 
             StopRightWheel();
             StopLeftWheel();
             state = 3;
             break;
          case 3:
-            MoveForwardTicks(5); 
+            MoveForwardTicks(10); 
             RightWheelReverse();
             LeftWheelForward();
             ReadAllADCValues(&data); 
             while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
                ReadAllADCValues(&data); 
-            _delay_ms(100); 
             StopRightWheel();
             StopLeftWheel();
             state = 4; 
@@ -239,28 +239,47 @@ void MoveForwardTicks(int ticks)
 {
    int count = 0;
    for (count = 0; count <= ticks; ++count)
+   {
       MoveForwardTick(); 
+      _delay_ms(500);
+   }
 }
 
 void MoveForwardTick()
 {
    int count = 0;
+   int state = 0;
    uint32_t reading = 0; 
-  
+
    LeftWheelForward();
    RightWheelForward(); 
-   _delay_ms(150); 
 
-   while (reading < BLACK_THRESHOLD) //go to black line
+   reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+
+   if (reading < WHITE_THRESHOLD)
+      state = 0;
+   else if (reading > WHITE_THRESHOLD)
+      state = 1; 
+   
+   //on black
+   if (state)
    {
-      reading = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
+      //Get to white
+      while (reading > WHITE_THRESHOLD)
+         reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+
+   } 
+   
+   //Get to black
+   while (reading < BLACK_THRESHOLD) //go to next black line on wheel
+   {
+      reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
    }  
      
    StopLeftWheel(); 
    StopRightWheel(); 
-   
 }
-      
+
 uint32_t ReadDigLineSensor(uint8_t port)
 {  
    uint32_t count = 0;
@@ -278,6 +297,20 @@ uint32_t ReadDigLineSensor(uint8_t port)
 
    return count; 
 }  
+
+uint32_t AvgReadDigLineSensor(uint8_t port)
+{
+   uint32_t sum = 0;
+   uint16_t count = 0;
+   uint16_t samples = 10; 
+
+   for (; count < samples; ++count)
+      sum += ReadDigLineSensor(port); 
+
+   sum /= samples; 
+
+   return sum; 
+}
 
 void MoveClawDown()
 {
