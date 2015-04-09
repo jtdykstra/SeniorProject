@@ -65,11 +65,14 @@ void MoveRightWheelTicks(int ticks);
 void MoveForwardTicks(int ticks);
 void MoveForwardTick();
 uint32_t AvgReadDigLineSensor(uint8_t port);
+void AvgReadAllADCValues(adcData *data);
 
 static volatile uint16_t isrCount = 0;
-static volatile uint16_t speed = 4; 
+static volatile uint16_t speed = 1; 
 static uint8_t leftWheelToggle = 0; 
 static uint8_t rightWheelToggle = 0; 
+static void (*timer1Behavior)(); 
+static int state = 0; 
 
 ISR(TIMER2_COMPA_vect) {
    if (++isrCount == speed)
@@ -79,8 +82,19 @@ ISR(TIMER2_COMPA_vect) {
    }
 }
 
+ISR(TIMER1_COMPA_vect) {
+   timer1Behavior(); 
+}
+
 ISR(BADISR_vect) {
    print_string("bad isr!\r\n");
+}
+
+void FollowOne()
+{
+   state = 3;
+   TIMSK1 &= ~(1 << OCIE1A);
+   TCNT1 = 0;
 }
 
 int main(void)
@@ -88,7 +102,7 @@ int main(void)
    serial_init(); 
    DDRB = PWM_PIN | LEFT_MOTOR_RED_WIRE | LEFT_MOTOR_BLACK_WIRE | RIGHT_MOTOR_RED_WIRE | RIGHT_MOTOR_BLACK_WIRE; 
    DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT; 
-   //SetupClaw(); 
+   SetupClaw(); 
 
    //ADC setup. Lookup settings in the manual to tweak. 
    ADCSRA = (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //set the ADC prescaler to 128
@@ -103,17 +117,24 @@ int main(void)
    TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); //Prescaler
    OCR2A = 255; 
 
-   adcData data; 
-   data.len = 7; 
+   //Line following timer
+   //TIMSK1 = (1 << OCIE1A);
+   //TCNT1 = 0;
+   //TCCR1A = (1 << WGM12); //CTC mode;
+   //TCCR1B = (1 << CS12) | (1 << CS10); //clock divider of 1024 
 
-   int state = 0; 
+   adcData data; 
+   data.len = 6; 
+
    uint32_t leftDig = 0;
    uint32_t rightDig = 0;
    sei();
+   int flag = 0;
+
    while (1)
    {  
-      ReadAllADCValues(&data);
-/*      rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+      /*AvgReadAllADCValues(&data);
+      rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
       leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
       set_cursor(0,0);
       print_int(data.readings[OUTER_LEFT_LINE_SENSOR]);
@@ -132,13 +153,27 @@ int main(void)
       _delay_ms(500);
       clear_screen();*/
 
-      if (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && 
-            data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD &&
+      if (flag)
+      {
+         OpenClaw();
+         MoveClawDown();
+         flag = 0;
+      }
+      else 
+      {
+         CloseClaw();
+         MoveClawUp();
+         flag = 1;
+      }
+
+      _delay_ms(1000);
+
+      /*if ((data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
+            data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
               state == 0)
       {
         state = 1;   
-      } 
- 
+      }  
  
       switch(state) 
       {
@@ -160,36 +195,85 @@ int main(void)
             break;
          case 1: 
             StopLeftWheel();
-            StopRightWheel();
-            _delay_ms(1000);
-            MoveForwardTicks(6); 
+            StopRightWheel(); 
+            _delay_ms(1000); 
+
+            //Sets up the timer to stop following the line
+            LeftWheelForward();
+            RightWheelForward();
+
+            while (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               AvgReadAllADCValues(&data);
+            }
+               
+
+            timer1Behavior = FollowOne; 
+            TIMSK1 = (1 << OCIE1A);
+            TCNT1 = 0;
+            OCR1A = 22000; //two seconds 
             state = 2; 
             break;
-         case 2:
-            RightWheelForward(); 
-            LeftWheelReverse(); 
-            ReadAllADCValues(&data); 
-            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
-               ReadAllADCValues(&data);
-            StopRightWheel();
-            StopLeftWheel();
-            state = 3;
+         case 2: //follow the line for x seconds
+            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopLeftWheel();
+               _delay_ms(75); 
+            }
+
+            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopRightWheel();
+               _delay_ms(75);
+            }
+
+            LeftWheelForward();
+            RightWheelForward();
+            
             break;
          case 3:
-            MoveForwardTicks(10); 
-            RightWheelReverse();
-            LeftWheelForward();
-            ReadAllADCValues(&data); 
-            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
-               ReadAllADCValues(&data); 
-            StopRightWheel();
-            StopLeftWheel();
-            state = 4; 
+            AvgReadAllADCValues(&data);
+            LeftWheelReverse();
+            RightWheelReverse(); 
+
+            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopRightWheel();
+               _delay_ms(75); 
+            }
+
+            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopLeftWheel();
+               _delay_ms(75);
+            }
+
+            if  (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
+                  data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               state = 4; 
+            }
+
+            break;
+         case 4:
+            //turn right until middle line sensor hits middle line
+            LeftWheelReverse();
+            RightWheelForward(); 
+            _delay_ms(500);  
+
+            while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
+               AvgReadAllADCValues(&data);
+
+            StopLeftWheel(); 
+            StopRightWheel(); 
+
+            state = 5; 
+            break;
+         case 5:
             break;
          default:
-             
             break;
-      }
+      }*/
    }
 } 
 
@@ -357,6 +441,40 @@ void ReadAllADCValues(adcData *data)
       ++ind;
    } 
 } 
+
+void AvgReadAllADCValues(adcData *data)
+{
+   uint16_t ind = 0;
+   uint16_t samples = 0;
+   uint16_t max_sample = 2;
+   
+   for (ind = 0; ind < data->len; ++ind)
+      data->readings[ind] = 0;
+
+   while (samples < max_sample)
+   {
+      ind = 0;
+
+      //read all desired adc values into the adcData struct
+      while (ind < data->len) 
+      { 
+         //Select the current adc mux value
+         ADMUX &= ~(0xF); //clear lower 4 bits, which are the mux values
+         ADMUX |= ind; //set the correct mux value 
+         ADCSRA |= (1 << ADSC); //Start measuring! 
+         while (ADCSRA & (1 << ADSC))  //wait for measurement to complete
+            ;
+         data->readings[ind] += ADCH; //add the reading to the data
+         //ADCSRA &= ~(1 << ADIF); //clear interrupt flag 
+         ++ind;
+      } 
+
+      ++samples; 
+   }
+
+   for (ind = 0; ind < data->len; ++ind)
+      data->readings[ind] /= samples; 
+}
 
 //Setup timer for claw opening / closing
 //The specific WGM values determine the mode of operation, in this case PWM
