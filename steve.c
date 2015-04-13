@@ -59,6 +59,7 @@ void StopRightWheel();
 void ReadAllADCValues(adcData *data);
 void MoveClawUp();
 void MoveClawDown(); 
+void StopClawOutput();
 uint32_t ReadDigLineSensor(uint8_t port);
 void MoveLeftWheelTicks(int ticks);
 void MoveRightWheelTicks(int ticks);
@@ -66,20 +67,39 @@ void MoveForwardTicks(int ticks);
 void MoveForwardTick();
 uint32_t AvgReadDigLineSensor(uint8_t port);
 void AvgReadAllADCValues(adcData *data);
+void FullyOpenClaw();
+void FullyCloseClaw();
 
 static volatile uint16_t isrCount = 0;
 static volatile uint16_t speed = 1; 
 static uint8_t leftWheelToggle = 0; 
 static uint8_t rightWheelToggle = 0; 
 static void (*timer1Behavior)(); 
-static int state = 0; 
+static volatile int state = 0; 
+static volatile int openClawState = 0;
+static volatile int closeClawState = 0;
+static volatile int lineFollowCount = 0;
+static volatile int turning = 0;
+static int lowMotorCount = 5;
+static int highMotorCount = 20;
+static int curMotorCount = 0;
 
 ISR(TIMER2_COMPA_vect) {
-   if (++isrCount == speed)
+   
+   if (turning)
    {
-      PORTB ^= (leftWheelToggle | rightWheelToggle);  
-      isrCount = 0;
+      ++curMotorCount;
+      if (curMotorCount == lowMotorCount)
+         PORTB |= (leftWheelToggle | rightWheelToggle);  
+      else if (curMotorCount == highMotorCount)
+      {
+         PORTB &= ~(leftWheelToggle | rightWheelToggle);
+         curMotorCount = 0;
+      }
    }
+
+   if (!turning)
+      PORTB |= leftWheelToggle | rightWheelToggle; 
 }
 
 ISR(TIMER1_COMPA_vect) {
@@ -92,9 +112,53 @@ ISR(BADISR_vect) {
 
 void FollowOne()
 {
-   state = 3;
+      state = 3;
+      TIMSK1 &= ~(1 << OCIE1A);
+      TCNT1 = 0;
+}
+
+void FollowTwo()
+{
+   state = 9;
    TIMSK1 &= ~(1 << OCIE1A);
    TCNT1 = 0;
+}
+
+void OpenClawISRHandler()
+{
+   if (openClawState == 0)
+   {
+      PORTB |= PWM_PIN;
+      OCR1A = 31;
+      TCNT1 = 0;
+      openClawState = 1;
+   }
+   else if (openClawState == 1)
+   {
+      PORTB &= ~(PWM_PIN);
+      TCNT1 = 0;
+      OCR1A = 281;
+      openClawState = 0;
+   }
+}
+
+void CloseClawISRHandler()
+{
+
+   if (closeClawState == 0)
+   {
+      PORTB |= PWM_PIN;
+      TCNT1 = 0;
+      OCR1A = 15;
+      closeClawState = 1;
+   }
+   else if (closeClawState == 1)
+   {
+      PORTB &= ~(PWM_PIN);
+      TCNT1 = 0;
+      OCR1A = 297;
+      closeClawState = 0;
+   }
 }
 
 int main(void)
@@ -102,7 +166,6 @@ int main(void)
    serial_init(); 
    DDRB = PWM_PIN | LEFT_MOTOR_RED_WIRE | LEFT_MOTOR_BLACK_WIRE | RIGHT_MOTOR_RED_WIRE | RIGHT_MOTOR_BLACK_WIRE; 
    DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT; 
-   SetupClaw(); 
 
    //ADC setup. Lookup settings in the manual to tweak. 
    ADCSRA = (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //set the ADC prescaler to 128
@@ -117,12 +180,12 @@ int main(void)
    TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); //Prescaler
    OCR2A = 255; 
 
-   //Line following timer
-   //TIMSK1 = (1 << OCIE1A);
-   //TCNT1 = 0;
-   //TCCR1A = (1 << WGM12); //CTC mode;
-   //TCCR1B = (1 << CS12) | (1 << CS10); //clock divider of 1024 
+   //Line following / claw timer setup 
+   TCNT1 = 0;
+   TCCR1A = 0;
+   TCCR1B = (1 << WGM12) | (1 << CS10) | (1 << CS12); //clock divider of 1024 
 
+   //ADC data container
    adcData data; 
    data.len = 6; 
 
@@ -130,12 +193,19 @@ int main(void)
    uint32_t rightDig = 0;
    sei();
    int flag = 0;
-
+   int crossCount = 0;
+   int blackOn = 0;
+   StopLeftWheel();
+   StopRightWheel();
+   _delay_ms(1000);
+   
    while (1)
    {  
+
+
       /*AvgReadAllADCValues(&data);
-      rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-      leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
+      //rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
+      //leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
       set_cursor(0,0);
       print_int(data.readings[OUTER_LEFT_LINE_SENSOR]);
       print_string("***");
@@ -147,133 +217,262 @@ int main(void)
       print_string("***");
       print_int(data.readings[OUTER_RIGHT_LINE_SENSOR]);
       print_string("\r\n\r\n");
-      print_int32(leftDig);
-      print_string("----");
-      print_int32(rightDig); 
+      //print_int32(leftDig);
+      //print_string("----");
+      //print_int32(rightDig); 
       _delay_ms(500);
       clear_screen();*/
+   /*if (flag)
+   {
+      FullyOpenClaw();
+      MoveClawUp();
+      flag = 0;
+   }
+   else
+   {
+      FullyCloseClaw();
+      MoveClawDown();
+      flag = 1;
+   }
+   _delay_ms(2000);*/
 
-      if (flag)
+      
+      AvgReadAllADCValues(&data);
+      if ((data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
+            data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
+              (state == 0 || state == 6) && blackOn == 0)
       {
-         OpenClaw();
-         MoveClawDown();
-         flag = 0;
-      }
-      else 
-      {
-         CloseClaw();
-         MoveClawUp();
-         flag = 1;
-      }
-
-      _delay_ms(1000);
-
-      /*if ((data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
-            data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
-              state == 0)
-      {
-        state = 1;   
+         StopLeftWheel();
+         StopRightWheel();
+         _delay_ms(3000);
+         ++crossCount;   
+         blackOn = 1;
       }  
+      else if ((data.readings[OUTER_LEFT_LINE_SENSOR] < THRESHOLD && data.readings[OUTER_RIGHT_LINE_SENSOR] < THRESHOLD)
+                 && blackOn == 1)
+         blackOn = 0;
+
+      if (crossCount == 2)
+      {
+         ++state;
+         ++crossCount;
+      }
  
       switch(state) 
       {
          case 0: //follow the line
-            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelForward();
+               RightWheelForward();
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
             {  
                StopLeftWheel();
+               RightWheelForward();
                _delay_ms(75); 
             }
-
-            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
+               LeftWheelForward();
                _delay_ms(75);
             }
 
-            LeftWheelForward();
-            RightWheelForward();
             break;
          case 1: 
             StopLeftWheel();
             StopRightWheel(); 
-            _delay_ms(1000); 
+            //MoveClawDown();
+            FullyOpenClaw();
 
-            //Sets up the timer to stop following the line
-            LeftWheelForward();
-            RightWheelForward();
-
-            while (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD && data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD)
-            {
-               AvgReadAllADCValues(&data);
-            }
-               
-
-            timer1Behavior = FollowOne; 
-            TIMSK1 = (1 << OCIE1A);
-            TCNT1 = 0;
-            OCR1A = 22000; //two seconds 
             state = 2; 
+            cli();
+            TIFR1 |= (1 << OCF1A);
+            TCNT1 = 0;
+            timer1Behavior = FollowOne; 
+            OCR1A = 60000; 
+            TIMSK1 = (1 << OCIE1A);
+            sei();
+
             break;
          case 2: //follow the line for x seconds
-            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelForward();
+               RightWheelForward();
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
             {  
                StopLeftWheel();
+               RightWheelForward();
                _delay_ms(75); 
             }
-
-            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
+               LeftWheelForward();
                _delay_ms(75);
             }
 
-            LeftWheelForward();
-            RightWheelForward();
-            
             break;
          case 3:
-            AvgReadAllADCValues(&data);
-            LeftWheelReverse();
-            RightWheelReverse(); 
-
-            if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
-            {  
-               StopRightWheel();
-               _delay_ms(75); 
-            }
-
-            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
-            {
-               StopLeftWheel();
-               _delay_ms(75);
-            }
-
-            if  (data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
-                  data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD)
-            {
-               state = 4; 
-            }
-
+            StopLeftWheel();
+            StopRightWheel();
+            FullyCloseClaw();
+            state = 4;
             break;
          case 4:
+            
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelReverse();
+               RightWheelReverse(); 
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               LeftWheelReverse();
+               StopRightWheel();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopLeftWheel();
+               RightWheelReverse();;
+               _delay_ms(75);
+            }
+
+            if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
+                  data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               state = 5; 
+               StopLeftWheel();
+               StopRightWheel();
+            }
+
+            break;
+         case 5:
             //turn right until middle line sensor hits middle line
+            turning = 1;
             LeftWheelReverse();
             RightWheelForward(); 
             _delay_ms(500);  
 
-            while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
+            AvgReadAllADCValues(&data);
+            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
                AvgReadAllADCValues(&data);
-
-            StopLeftWheel(); 
+            StopLeftWheel();
             StopRightWheel(); 
+            turning = 0;
+            _delay_ms(1000);
 
-            state = 5; 
+            state = 6; 
+            crossCount = 0;
+            blackOn = 0;
             break;
-         case 5:
+         case 6:
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelForward();
+               RightWheelForward();
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopLeftWheel();
+               RightWheelForward();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopRightWheel();
+               LeftWheelForward();
+               _delay_ms(75);
+            }
+            
             break;
+         case 7:
+            state = 8; 
+            cli();
+            TIFR1 |= (1 << OCF1A);
+            TCNT1 = 0;
+            timer1Behavior = FollowTwo; 
+            OCR1A = 30000; 
+            TIMSK1 = (1 << OCIE1A);
+            sei(); 
+            break;
+         case 8:
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelForward();
+               RightWheelForward();
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopLeftWheel();
+               RightWheelForward();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopRightWheel();
+               LeftWheelForward();
+               _delay_ms(75);
+            }
+            break;
+         case 9:
+            FullyOpenClaw(); 
+            state = 10;
+            break;
+         case 10:
+
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelReverse();
+               RightWheelReverse(); 
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               LeftWheelReverse();
+               StopRightWheel();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopLeftWheel();
+               RightWheelReverse();;
+               _delay_ms(75);
+            }
+
+            if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
+                  data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               state = 11; 
+               StopLeftWheel();
+               StopRightWheel();
+            }
+            break;
+         case 11:
+            turning = 1;
+            LeftWheelReverse();
+            RightWheelForward(); 
+            _delay_ms(500);  
+
+            AvgReadAllADCValues(&data);
+            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
+               AvgReadAllADCValues(&data);
+            StopLeftWheel();
+            StopRightWheel(); 
+            turning = 0;
+            _delay_ms(1000);
+            crossCount = 0;
+            blackOn = 0;
+            state = 0; 
+            break;
+
          default:
+            
             break;
-      }*/
+      }
    }
 } 
 
@@ -476,6 +675,7 @@ void AvgReadAllADCValues(adcData *data)
       data->readings[ind] /= samples; 
 }
 
+//Deprecated
 //Setup timer for claw opening / closing
 //The specific WGM values determine the mode of operation, in this case PWM
 //The COM bits invert the PWM
@@ -483,31 +683,47 @@ void AvgReadAllADCValues(adcData *data)
 //The ICR1 register is the top bit
 //The OCR1A bit is where the first toggle occurs, then the line goes low
 //again when ICR1 is hit. 
-void SetupClaw()
+/*void SetupClaw()
 {
    TCCR1A |= 1 << WGM11 | 1 << COM1A1 | 1 << COM1A0 ;
    TCCR1B |= 1 << WGM13 | 1 << WGM12 | 1 << CS10 | 1 << CS12; //clock prescaler of 1024
    ICR1 = 313; //This will prevent anything from happening for now
-}
+}*/
 
 void OpenClaw()
 {
-   OCR1A = ICR1 - 31; //Set the pulse width to about 2 ms
-   _delay_ms(1000); 
-   ICR1 = 313; 
+   timer1Behavior = OpenClawISRHandler;
+   TCNT1 = 0;
+   OCR1A = 31;
+   TIMSK1 = (1 << OCIE1A);
+}
 
+void FullyOpenClaw()
+{
+   OpenClaw();
+   _delay_ms(2000);
+   StopClawOutput();
 }
 
 void CloseClaw()
 {
-   OCR1A = ICR1 - 15; //Set the pulse width to about 1 ms
-   _delay_ms(1000); 
-   ICR1 = 313; 
+   timer1Behavior = CloseClawISRHandler;
+   TCNT1 = 0;
+   OCR1A = 15; 
+   TIMSK1 = (1 << OCIE1A);
 }
+
+void FullyCloseClaw()
+{
+   CloseClaw();
+   _delay_ms(2000);
+   StopClawOutput();
+}
+
 
 void StopClawOutput()
 {
-
+      TIMSK1 &= ~(1 << OCIE1A);
 } 
 
 void LeftWheelForward()
