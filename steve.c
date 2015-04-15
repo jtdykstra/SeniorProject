@@ -119,6 +119,14 @@ void FollowOne()
 
 void FollowTwo()
 {
+   //update this
+   state = 13;
+   TIMSK1 &= ~(1 << OCIE1A);
+   TCNT1 = 0;
+}
+
+void FollowThree()
+{
    state = 9;
    TIMSK1 &= ~(1 << OCIE1A);
    TCNT1 = 0;
@@ -198,6 +206,7 @@ int main(void)
    StopLeftWheel();
    StopRightWheel();
    _delay_ms(1000);
+   MoveClawDown();
    
    while (1)
    {  
@@ -244,7 +253,7 @@ int main(void)
       {
          StopLeftWheel();
          StopRightWheel();
-         _delay_ms(3000);
+         //_delay_ms(3000);
          ++crossCount;   
          blackOn = 1;
       }  
@@ -364,7 +373,7 @@ int main(void)
             StopLeftWheel();
             StopRightWheel(); 
             turning = 0;
-            _delay_ms(1000);
+            //_delay_ms(1000);
 
             state = 6; 
             crossCount = 0;
@@ -390,8 +399,71 @@ int main(void)
             }
             
             break;
-         case 7:
+         case 7: //reverse direction for a bit 
             state = 8; 
+            cli();
+            TIFR1 |= (1 << OCF1A);
+            TCNT1 = 0;
+            timer1Behavior = FollowThree; 
+            OCR1A = 15000; 
+            TIMSK1 = (1 << OCIE1A);
+            sei(); 
+            break;
+         case 8: //reverse direction for a bit
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelReverse();
+               RightWheelReverse(); 
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               LeftWheelReverse();
+               StopRightWheel();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopLeftWheel();
+               RightWheelReverse();;
+               _delay_ms(75);
+            }
+            break;
+         case 9: //Move the claw up
+            StopLeftWheel();
+            StopRightWheel();
+            MoveClawUp();
+            state = 10;
+            break;
+         case 10: //Go forward to line
+            if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
+            {
+               LeftWheelForward();
+               RightWheelForward();
+            }
+            else if (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {  
+               StopLeftWheel();
+               RightWheelForward();
+               _delay_ms(75); 
+            }
+            else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
+            {
+               StopRightWheel();
+               LeftWheelForward();
+               _delay_ms(75);
+            }
+
+            if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD && data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
+            {
+               state = 11;
+            }
+
+            break;
+         case 11:
+            StopLeftWheel();
+            StopRightWheel();
+            //_delay_ms(1000);
+            state = 12; 
             cli();
             TIFR1 |= (1 << OCF1A);
             TCNT1 = 0;
@@ -400,7 +472,7 @@ int main(void)
             TIMSK1 = (1 << OCIE1A);
             sei(); 
             break;
-         case 8:
+         case 12:
             if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
             {
                LeftWheelForward();
@@ -419,11 +491,12 @@ int main(void)
                _delay_ms(75);
             }
             break;
-         case 9:
+         case 13:
+            
             FullyOpenClaw(); 
-            state = 10;
+            state = 14;
             break;
-         case 10:
+         case 14:
 
             if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
             {
@@ -446,12 +519,12 @@ int main(void)
             if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
                   data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
-               state = 11; 
+               state = 15; 
                StopLeftWheel();
                StopRightWheel();
             }
             break;
-         case 11:
+         case 15:
             turning = 1;
             LeftWheelReverse();
             RightWheelForward(); 
@@ -462,8 +535,9 @@ int main(void)
                AvgReadAllADCValues(&data);
             StopLeftWheel();
             StopRightWheel(); 
+            MoveClawDown();
             turning = 0;
-            _delay_ms(1000);
+            //_delay_ms(1000);
             crossCount = 0;
             blackOn = 0;
             state = 0; 
@@ -701,7 +775,7 @@ void OpenClaw()
 void FullyOpenClaw()
 {
    OpenClaw();
-   _delay_ms(2000);
+   _delay_ms(4000);
    StopClawOutput();
 }
 
@@ -716,7 +790,7 @@ void CloseClaw()
 void FullyCloseClaw()
 {
    CloseClaw();
-   _delay_ms(2000);
+   _delay_ms(4000);
    StopClawOutput();
 }
 
