@@ -26,6 +26,8 @@
 #define RACK_MOTOR_BLACK 0x40         //Pin 6
 #define DIG_LINE_SENSOR_RIGHT 0x20    //Pin 4
 #define DIG_LINE_SENSOR_LEFT 0x10    //Pin 5
+#define LEFT_WHEEL_PIN 0x10 //Pin 5
+#define RIGHT_WHEEL_PIN 0x20 //Pin 4
 
 //Analog sensors
 #define THRESHOLD 200                 
@@ -42,6 +44,13 @@
 //Interrupt counts for specific motor speeds
 #define MOTOR_SPEED_1 16 //500 HZ  
 #define MOVE_DELAY 100
+
+#define LEFT_WHEEL_STOP 0
+#define LEFT_WHEEL_FORWARD 1
+#define LEFT_WHEEL_REVERSE 2
+#define RIGHT_WHEEL_STOP 0
+#define RIGHT_WHEEL_FORWARD 1
+#define RIGHT_WHEEL_REVERSE 2
 
 typedef struct adcData {
    uint16_t len;
@@ -84,10 +93,13 @@ static volatile int turning = 0;
 static int lowMotorCount = 5;
 static int highMotorCount = 20;
 static int curMotorCount = 0;
+static int leftWheelState = 0;
+static int rightWheelState = 0;
+static int motorState = 0;
 
 ISR(TIMER2_COMPA_vect) {
    
-   if (turning)
+   /*if (turning)
    {
       ++curMotorCount;
       if (curMotorCount == lowMotorCount)
@@ -99,7 +111,56 @@ ISR(TIMER2_COMPA_vect) {
       }
    }
    else 
-      PORTB |= leftWheelToggle | rightWheelToggle; 
+      PORTB |= leftWheelToggle | rightWheelToggle; */
+   switch (motorState)
+   {  //16 MHz, 1024 prescaler -> 64 uS periood
+      case 0:
+         OCR2A = 255;
+         TCNT2 = 0;
+         ++motorState;
+         break;
+      case 1:
+         OCR2A = 5;
+         TCNT2 = 0;
+         ++motorState;
+         break;
+      case 2: //2 ms pulse
+         if (leftWheelState == LEFT_WHEEL_FORWARD)
+            PORTD |= LEFT_WHEEL_PIN;
+         if (rightWheelState == RIGHT_WHEEL_FORWARD)
+            PORTD |= RIGHT_WHEEL_PIN;
+         if (leftWheelState == LEFT_WHEEL_STOP)
+            PORTD &= ~(LEFT_WHEEL_STOP);
+         if (rightWheelState == RIGHT_WHEEL_STOP)
+            PORTD &= ~(RIGHT_WHEEL_STOP);
+         OCR2A = 8;
+         TCNT2 = 0;
+         ++motorState;
+         break;
+      case 3: //1.5 ms pulse
+        /* if (leftWheelState == LEFT_WHEEL_STOP)
+            PORTD |= LEFT_WHEEL_PIN;
+         if (rightWheelState == RIGHT_WHEEL_STOP)
+            PORTD |= RIGHT_WHEEL_PIN;*/
+         OCR2A = 8;
+         TCNT2 = 0;
+         ++motorState;
+         break;
+      case 4:
+         if (leftWheelState == LEFT_WHEEL_REVERSE)
+            PORTD |= LEFT_WHEEL_PIN;
+         if (rightWheelState == RIGHT_WHEEL_REVERSE)
+            PORTD |= RIGHT_WHEEL_PIN;
+         OCR2A = 16;
+         TCNT2 = 0;
+         ++motorState;
+         break;
+      case 5:
+         //Drive low
+         PORTD &= ~(LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN);
+         motorState = 0;
+         break;
+   }
 }
 
 ISR(TIMER1_COMPA_vect) {
@@ -173,7 +234,7 @@ int main(void)
 {
    serial_init(); 
    DDRB = PWM_PIN | LEFT_MOTOR_RED_WIRE | LEFT_MOTOR_BLACK_WIRE | RIGHT_MOTOR_RED_WIRE | RIGHT_MOTOR_BLACK_WIRE; 
-   DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT; 
+   DDRD = RACK_MOTOR_RED | RACK_MOTOR_BLACK | DIG_LINE_SENSOR_LEFT | DIG_LINE_SENSOR_RIGHT | LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN; 
 
    //ADC setup. Lookup settings in the manual to tweak. 
    ADCSRA = (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); //set the ADC prescaler to 128
@@ -242,8 +303,23 @@ int main(void)
       flag = 1;
    }
    _delay_ms(2000);*/
-   LeftWheelReverse();
+   //LeftWheelReverse();
+   //RightWheelReverse();
+   //LeftWheelForward();
+   //RightWheelForward();
+   /*leftWheelState = LEFT_WHEEL_FORWARD;
+   rightWheelState = RIGHT_WHEEL_FORWARD;*/
+   LeftWheelForward();
    RightWheelReverse();
+   _delay_ms(3000);
+   LeftWheelReverse();
+   RightWheelForward();
+   /*leftWheelState = LEFT_WHEEL_REVERSE;
+   rightWheelState = RIGHT_WHEEL_REVERSE;*/
+   _delay_ms(3000);
+   StopLeftWheel();
+   StopRightWheel();
+   _delay_ms(3000);
 
       /*AvgReadAllADCValues(&data);
       if ((data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
@@ -799,38 +875,44 @@ void StopClawOutput()
 
 void LeftWheelForward()
 {
+   leftWheelState = LEFT_WHEEL_FORWARD;
     /*leftWheelToggle = LEFT_MOTOR_RED_WIRE; //drive red wire high
     PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); //drive black wire low*/
 }
 
 void LeftWheelReverse()
 {
-    leftWheelToggle = LEFT_MOTOR_BLACK_WIRE; 
-    PORTB &= ~(LEFT_MOTOR_RED_WIRE); 
+   leftWheelState = LEFT_WHEEL_REVERSE;
+    /*leftWheelToggle = LEFT_MOTOR_BLACK_WIRE; 
+    PORTB &= ~(LEFT_MOTOR_RED_WIRE); */
 }
 
 void RightWheelForward()
 {
+    rightWheelState = RIGHT_WHEEL_FORWARD;/*
     rightWheelToggle = RIGHT_MOTOR_RED_WIRE;
-    PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); 
+    PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); */
 }
 
 void RightWheelReverse()
 {
+   rightWheelState = RIGHT_WHEEL_REVERSE;/*
    rightWheelToggle = RIGHT_MOTOR_BLACK_WIRE; 
-   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); 
+   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); */
 }
 
 void StopLeftWheel()
 {
+   leftWheelState = LEFT_WHEEL_STOP;/*
    leftWheelToggle = 0; 
    PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); 
-   PORTB &= ~(LEFT_MOTOR_RED_WIRE); 
+   PORTB &= ~(LEFT_MOTOR_RED_WIRE); */
 }
 
 void StopRightWheel()
 {
+   rightWheelState = RIGHT_WHEEL_STOP;/*
    rightWheelToggle = 0; 
    PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); 
-   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); 
+   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); */
 }
