@@ -41,8 +41,9 @@
 
 //Interrupt counts for specific motor speeds
 #define MOTOR_SPEED_1 16 //500 HZ  
+#define MOVE_DELAY 100
 
-typedef struct adcData { 
+typedef struct adcData {
    uint16_t len;
    int16_t readings[NUM_ADC]; 
 } adcData; 
@@ -97,8 +98,7 @@ ISR(TIMER2_COMPA_vect) {
          curMotorCount = 0;
       }
    }
-
-   if (!turning)
+   else 
       PORTB |= leftWheelToggle | rightWheelToggle; 
 }
 
@@ -210,8 +210,6 @@ int main(void)
    
    while (1)
    {  
-
-
       /*AvgReadAllADCValues(&data);
       //rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
       //leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
@@ -244,9 +242,10 @@ int main(void)
       flag = 1;
    }
    _delay_ms(2000);*/
+   LeftWheelReverse();
+   RightWheelReverse();
 
-      
-      AvgReadAllADCValues(&data);
+      /*AvgReadAllADCValues(&data);
       if ((data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
               (state == 0 || state == 6) && blackOn == 0)
@@ -279,20 +278,19 @@ int main(void)
             {  
                StopLeftWheel();
                RightWheelForward();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
                LeftWheelForward();
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
 
             break;
          case 1: 
             StopLeftWheel();
             StopRightWheel(); 
-            //MoveClawDown();
             FullyOpenClaw();
 
             state = 2; 
@@ -315,13 +313,13 @@ int main(void)
             {  
                StopLeftWheel();
                RightWheelForward();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
                LeftWheelForward();
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
 
             break;
@@ -342,13 +340,13 @@ int main(void)
             {  
                LeftWheelReverse();
                StopRightWheel();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopLeftWheel();
                RightWheelReverse();;
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
 
             if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
@@ -362,7 +360,7 @@ int main(void)
             break;
          case 5:
             //turn right until middle line sensor hits middle line
-            turning = 1;
+            //turning = 1;
             LeftWheelReverse();
             RightWheelForward(); 
             _delay_ms(500);  
@@ -389,13 +387,13 @@ int main(void)
             {  
                StopLeftWheel();
                RightWheelForward();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
                LeftWheelForward();
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
             
             break;
@@ -419,13 +417,13 @@ int main(void)
             {  
                LeftWheelReverse();
                StopRightWheel();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopLeftWheel();
                RightWheelReverse();;
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
             break;
          case 9: //Move the claw up
@@ -444,13 +442,13 @@ int main(void)
             {  
                StopLeftWheel();
                RightWheelForward();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
                LeftWheelForward();
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
 
             if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD && data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD)
@@ -482,13 +480,13 @@ int main(void)
             {  
                StopLeftWheel();
                RightWheelForward();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopRightWheel();
                LeftWheelForward();
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
             break;
          case 13:
@@ -507,13 +505,13 @@ int main(void)
             {  
                LeftWheelReverse();
                StopRightWheel();
-               _delay_ms(75); 
+               _delay_ms(MOVE_DELAY); 
             }
             else if (data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                StopLeftWheel();
                RightWheelReverse();;
-               _delay_ms(75);
+               _delay_ms(MOVE_DELAY);
             }
 
             if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
@@ -546,7 +544,7 @@ int main(void)
          default:
             
             break;
-      }
+      }*/
    }
 } 
 
@@ -794,7 +792,6 @@ void FullyCloseClaw()
    StopClawOutput();
 }
 
-
 void StopClawOutput()
 {
       TIMSK1 &= ~(1 << OCIE1A);
@@ -802,8 +799,8 @@ void StopClawOutput()
 
 void LeftWheelForward()
 {
-    leftWheelToggle = LEFT_MOTOR_RED_WIRE; //drive red wire high
-    PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); //drive black wire low
+    /*leftWheelToggle = LEFT_MOTOR_RED_WIRE; //drive red wire high
+    PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); //drive black wire low*/
 }
 
 void LeftWheelReverse()
