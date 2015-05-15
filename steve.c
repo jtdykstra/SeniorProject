@@ -82,36 +82,18 @@ void FullyCloseClaw();
 
 static volatile uint16_t isrCount = 0;
 static volatile uint16_t speed = 1; 
-static uint8_t leftWheelToggle = 0; 
-static uint8_t rightWheelToggle = 0; 
 static void (*timer1Behavior)(); 
 static volatile int state = 0; 
 static volatile int openClawState = 0;
 static volatile int closeClawState = 0;
 static volatile int lineFollowCount = 0;
 static volatile int turning = 0;
-static int lowMotorCount = 5;
-static int highMotorCount = 20;
-static int curMotorCount = 0;
 static int leftWheelState = 0;
 static int rightWheelState = 0;
 static int motorState = 0;
 
 ISR(TIMER2_COMPA_vect) {
    
-   /*if (turning)
-   {
-      ++curMotorCount;
-      if (curMotorCount == lowMotorCount)
-         PORTB |= (leftWheelToggle | rightWheelToggle);  
-      else if (curMotorCount == highMotorCount)
-      {
-         PORTB &= ~(leftWheelToggle | rightWheelToggle);
-         curMotorCount = 0;
-      }
-   }
-   else 
-      PORTB |= leftWheelToggle | rightWheelToggle; */
    switch (motorState)
    {  //16 MHz, 1024 prescaler -> 64 uS periood
       case 0:
@@ -138,15 +120,11 @@ ISR(TIMER2_COMPA_vect) {
          ++motorState;
          break;
       case 3: //1.5 ms pulse
-        /* if (leftWheelState == LEFT_WHEEL_STOP)
-            PORTD |= LEFT_WHEEL_PIN;
-         if (rightWheelState == RIGHT_WHEEL_STOP)
-            PORTD |= RIGHT_WHEEL_PIN;*/
          OCR2A = 8;
          TCNT2 = 0;
          ++motorState;
          break;
-      case 4:
+      case 4: //1 ms pulse
          if (leftWheelState == LEFT_WHEEL_REVERSE)
             PORTD |= LEFT_WHEEL_PIN;
          if (rightWheelState == RIGHT_WHEEL_REVERSE)
@@ -180,7 +158,6 @@ void FollowOne()
 
 void FollowTwo()
 {
-   //update this
    state = 13;
    TIMSK1 &= ~(1 << OCIE1A);
    TCNT1 = 0;
@@ -265,10 +242,7 @@ int main(void)
    adcData data; 
    data.len = 6; 
 
-   uint32_t leftDig = 0;
-   uint32_t rightDig = 0;
    sei();
-   int flag = 0;
    int crossCount = 0;
    int blackOn = 0;
    StopLeftWheel();
@@ -279,50 +253,13 @@ int main(void)
    
    while (1)
    {  
-      /*AvgReadAllADCValues(&data);
-      //rightDig = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-      //leftDig = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
-      set_cursor(0,0);
-      print_int(data.readings[OUTER_LEFT_LINE_SENSOR]);
-      print_string("***");
-      print_int(data.readings[INNER_LEFT_LINE_SENSOR]);
-      print_string("***");
-      print_int(data.readings[MIDDLE_LINE_SENSOR]);
-      print_string("***");
-      print_int(data.readings[INNER_RIGHT_LINE_SENSOR]);
-      print_string("***");
-      print_int(data.readings[OUTER_RIGHT_LINE_SENSOR]);
-      print_string("\r\n\r\n");
-      //print_int32(leftDig);
-      //print_string("----");
-      //print_int32(rightDig); 
-      _delay_ms(500);
-      clear_screen();*/
-   /*if (flag)
-   {
-      FullyOpenClaw();
-      MoveClawUp();
-      flag = 0;
-   }
-   else
-   {
-      FullyCloseClaw();
-      MoveClawDown();
-      flag = 1;
-   }
-   _delay_ms(2000);*/
-   //LeftWheelReverse();
-      //RightWheelForward();
-      //_delay_ms(3000);
-
       AvgReadAllADCValues(&data);
       if ((data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
-              (state == 0 || state == 6) && blackOn == 0)
+             (state == 0 || state == 6) && blackOn == 0)
       {
          StopLeftWheel();
          StopRightWheel();
-         //_delay_ms(3000);
          ++crossCount;   
          blackOn = 1;
       }  
@@ -399,7 +336,7 @@ int main(void)
             state = 4;
             break;
          case 4:
-            
+           
             if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
             {
                LeftWheelReverse();
@@ -429,7 +366,6 @@ int main(void)
             break;
          case 5:
             //turn right until middle line sensor hits middle line
-            //turning = 1;
             LeftWheelReverse();
             RightWheelForward(); 
             _delay_ms(500);  
@@ -440,7 +376,6 @@ int main(void)
             StopLeftWheel();
             StopRightWheel(); 
             turning = 0;
-            //_delay_ms(1000);
 
             state = 6; 
             crossCount = 0;
@@ -466,7 +401,7 @@ int main(void)
             }
             
             break;
-         case 7: //reverse direction for a bit 
+         case 7:  
             state = 8; 
             cli();
             TIFR1 |= (1 << OCF1A);
@@ -476,7 +411,7 @@ int main(void)
             TIMSK1 = (1 << OCIE1A);
             sei(); 
             break;
-         case 8: //reverse direction for a bit
+         case 8: 
             if (data.readings[MIDDLE_LINE_SENSOR] > THRESHOLD)
             {
                LeftWheelReverse();
@@ -530,7 +465,6 @@ int main(void)
          case 11:
             StopLeftWheel();
             StopRightWheel();
-            //_delay_ms(1000);
             state = 12; 
             cli();
             TIFR1 |= (1 << OCF1A);
@@ -596,11 +530,6 @@ int main(void)
                _delay_ms(MOVE_DELAY);
             }
 
-            /*if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
-                  data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
-            {
-               state = 15; 
-            }*/
             break;
          case 15:
             LeftWheelReverse();
@@ -611,143 +540,18 @@ int main(void)
             while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
                AvgReadAllADCValues(&data);
 
-
-            
             StopLeftWheel();
             StopRightWheel(); 
             MoveClawDown();
-            //_delay_ms(1000);
             crossCount = 0;
             blackOn = 0;
             state = 0; 
-
             break;
-
          default:
-            
             break;
       }
    }
 } 
-
-void MoveLeftWheelTicks(int ticks)
-{
-   int count = 0;
-   uint32_t reading = 0; 
-
-   LeftWheelForward();
-   _delay_ms(50); 
- 
-   for (; count <= ticks; ++count)
-   {  
-      while (reading < BLACK_THRESHOLD) //go to black line
-      {
-         reading = ReadDigLineSensor(DIG_LINE_SENSOR_LEFT); 
-      } 
-   } 
-   
-   LeftWheelReverse();
-   _delay_ms(10); 
-   StopLeftWheel(); 
-}
-
-void MoveRightWheelTicks(int ticks)
-{
-   int count = 0;
-   uint32_t reading = 0; 
-
-   RightWheelForward();
-   _delay_ms(50); 
- 
-   for (; count <= ticks; ++count)
-   {  
-      while (reading < BLACK_THRESHOLD) //go to black line
-      {
-         reading = ReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-      } 
-   } 
-   
-   RightWheelReverse();
-   _delay_ms(10); 
-   StopRightWheel(); 
-}
-
-void MoveForwardTicks(int ticks)
-{
-   int count = 0;
-   for (count = 0; count <= ticks; ++count)
-   {
-      MoveForwardTick(); 
-      _delay_ms(500);
-   }
-}
-
-void MoveForwardTick()
-{
-   int count = 0;
-   int state = 0;
-   uint32_t reading = 0; 
-
-   LeftWheelForward();
-   RightWheelForward(); 
-
-   reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-
-   if (reading < WHITE_THRESHOLD)
-      state = 0;
-   else if (reading > WHITE_THRESHOLD)
-      state = 1; 
-   
-   //on black
-   if (state)
-   {
-      //Get to white
-      while (reading > WHITE_THRESHOLD)
-         reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-
-   } 
-   
-   //Get to black
-   while (reading < BLACK_THRESHOLD) //go to next black line on wheel
-   {
-      reading = AvgReadDigLineSensor(DIG_LINE_SENSOR_RIGHT); 
-   }  
-     
-   StopLeftWheel(); 
-   StopRightWheel(); 
-}
-
-uint32_t ReadDigLineSensor(uint8_t port)
-{  
-   uint32_t count = 0;
-
-   DDRD |= port; //Drive pin high to charge cap (see schematic)
-   PORTD |= port; 
-   _delay_us(50); //50 us to charge cap (should probably verify this mathematically)
-   
-   //Switch the port to an input
-   DDRD &= ~(port); 
-   PORTD &= ~(port); 
-
-   while (PIND & port) //count the time it takes for the cap to drop below 2.5 V
-      ++count; 
-
-   return count; 
-}  
-
-uint32_t AvgReadDigLineSensor(uint8_t port)
-{
-   uint32_t sum = 0;
-   uint16_t count = 0;
-   uint16_t samples = 10; 
-
-   for (; count < samples; ++count)
-      sum += ReadDigLineSensor(port); 
-
-   sum /= samples; 
-
-   return sum; 
-}
 
 void MoveClawDown()
 {
@@ -829,21 +633,6 @@ void AvgReadAllADCValues(adcData *data)
       data->readings[ind] /= samples; 
 }
 
-//Deprecated
-//Setup timer for claw opening / closing
-//The specific WGM values determine the mode of operation, in this case PWM
-//The COM bits invert the PWM
-//The CS bits set the prescaler for the timer
-//The ICR1 register is the top bit
-//The OCR1A bit is where the first toggle occurs, then the line goes low
-//again when ICR1 is hit. 
-/*void SetupClaw()
-{
-   TCCR1A |= 1 << WGM11 | 1 << COM1A1 | 1 << COM1A0 ;
-   TCCR1B |= 1 << WGM13 | 1 << WGM12 | 1 << CS10 | 1 << CS12; //clock prescaler of 1024
-   ICR1 = 313; //This will prevent anything from happening for now
-}*/
-
 void OpenClaw()
 {
    timer1Behavior = OpenClawISRHandler;
@@ -882,43 +671,29 @@ void StopClawOutput()
 void LeftWheelForward()
 {
    leftWheelState = LEFT_WHEEL_FORWARD;
-    /*leftWheelToggle = LEFT_MOTOR_RED_WIRE; //drive red wire high
-    PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); //drive black wire low*/
 }
 
 void LeftWheelReverse()
 {
    leftWheelState = LEFT_WHEEL_REVERSE;
-    /*leftWheelToggle = LEFT_MOTOR_BLACK_WIRE; 
-    PORTB &= ~(LEFT_MOTOR_RED_WIRE); */
 }
 
 void RightWheelForward()
 {
-    rightWheelState = RIGHT_WHEEL_REVERSE;/*
-    rightWheelToggle = RIGHT_MOTOR_RED_WIRE;
-    PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); */
+    rightWheelState = RIGHT_WHEEL_REVERSE;
 }
 
 void RightWheelReverse()
 {
-   rightWheelState = RIGHT_WHEEL_FORWARD;/*
-   rightWheelToggle = RIGHT_MOTOR_BLACK_WIRE; 
-   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); */
+   rightWheelState = RIGHT_WHEEL_FORWARD;
 }
 
 void StopLeftWheel()
 {
-   leftWheelState = LEFT_WHEEL_STOP;/*
-   leftWheelToggle = 0; 
-   PORTB &= ~(LEFT_MOTOR_BLACK_WIRE); 
-   PORTB &= ~(LEFT_MOTOR_RED_WIRE); */
+   leftWheelState = LEFT_WHEEL_STOP;
 }
 
 void StopRightWheel()
 {
-   rightWheelState = RIGHT_WHEEL_STOP;/*
-   rightWheelToggle = 0; 
-   PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); 
-   PORTB &= ~(RIGHT_MOTOR_RED_WIRE); */
+   rightWheelState = RIGHT_WHEEL_STOP;
 }
