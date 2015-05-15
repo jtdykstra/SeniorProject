@@ -30,7 +30,7 @@
 #define RIGHT_WHEEL_PIN 0x20 //Pin 4
 
 //Analog sensors
-#define THRESHOLD 200                 
+#define THRESHOLD 180                 
 #define OUTER_LEFT_THRESH 150
 #define INNER_LEFT_THRESH 150
 #define MIDDLE_THRESH 150
@@ -193,6 +193,13 @@ void FollowThree()
    TCNT1 = 0;
 }
 
+void FollowFour()
+{
+   state = 15;
+   TIMSK1 &= ~(1 << OCIE1A);
+   TCNT1 = 0;
+}
+
 void OpenClawISRHandler()
 {
    if (openClawState == 0)
@@ -268,6 +275,7 @@ int main(void)
    StopRightWheel();
    _delay_ms(1000);
    MoveClawDown();
+   FullyOpenClaw();
    
    while (1)
    {  
@@ -304,24 +312,10 @@ int main(void)
    }
    _delay_ms(2000);*/
    //LeftWheelReverse();
-   //RightWheelReverse();
-   //LeftWheelForward();
-   //RightWheelForward();
-   /*leftWheelState = LEFT_WHEEL_FORWARD;
-   rightWheelState = RIGHT_WHEEL_FORWARD;*/
-   LeftWheelForward();
-   RightWheelReverse();
-   _delay_ms(3000);
-   LeftWheelReverse();
-   RightWheelForward();
-   /*leftWheelState = LEFT_WHEEL_REVERSE;
-   rightWheelState = RIGHT_WHEEL_REVERSE;*/
-   _delay_ms(3000);
-   StopLeftWheel();
-   StopRightWheel();
-   _delay_ms(3000);
+      //RightWheelForward();
+      //_delay_ms(3000);
 
-      /*AvgReadAllADCValues(&data);
+      AvgReadAllADCValues(&data);
       if ((data.readings[OUTER_LEFT_LINE_SENSOR] > THRESHOLD || 
             data.readings[OUTER_RIGHT_LINE_SENSOR] > THRESHOLD) &&
               (state == 0 || state == 6) && blackOn == 0)
@@ -367,14 +361,13 @@ int main(void)
          case 1: 
             StopLeftWheel();
             StopRightWheel(); 
-            FullyOpenClaw();
 
             state = 2; 
             cli();
             TIFR1 |= (1 << OCF1A);
             TCNT1 = 0;
             timer1Behavior = FollowOne; 
-            OCR1A = 60000; 
+            OCR1A = 30000; 
             TIMSK1 = (1 << OCIE1A);
             sei();
 
@@ -501,6 +494,7 @@ int main(void)
                RightWheelReverse();;
                _delay_ms(MOVE_DELAY);
             }
+
             break;
          case 9: //Move the claw up
             StopLeftWheel();
@@ -542,7 +536,7 @@ int main(void)
             TIFR1 |= (1 << OCF1A);
             TCNT1 = 0;
             timer1Behavior = FollowTwo; 
-            OCR1A = 30000; 
+            OCR1A = 700; 
             TIMSK1 = (1 << OCIE1A);
             sei(); 
             break;
@@ -564,11 +558,23 @@ int main(void)
                LeftWheelForward();
                _delay_ms(MOVE_DELAY);
             }
+            else
+            {
+               LeftWheelReverse();
+               RightWheelReverse();
+            }
             break;
          case 13:
             
             FullyOpenClaw(); 
             state = 14;
+            cli();
+            TIFR1 |= (1 << OCF1A);
+            TCNT1 = 0;
+            timer1Behavior = FollowFour; 
+            OCR1A = 25000; 
+            TIMSK1 = (1 << OCIE1A);
+            sei(); 
             break;
          case 14:
 
@@ -590,37 +596,37 @@ int main(void)
                _delay_ms(MOVE_DELAY);
             }
 
-            if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
+            /*if  (data.readings[INNER_LEFT_LINE_SENSOR] > THRESHOLD && 
                   data.readings[INNER_RIGHT_LINE_SENSOR] > THRESHOLD)
             {
                state = 15; 
-               StopLeftWheel();
-               StopRightWheel();
-            }
+            }*/
             break;
          case 15:
-            turning = 1;
             LeftWheelReverse();
             RightWheelForward(); 
             _delay_ms(500);  
 
             AvgReadAllADCValues(&data);
-            while (data.readings[MIDDLE_LINE_SENSOR] < THRESHOLD)
+            while (data.readings[INNER_LEFT_LINE_SENSOR] < THRESHOLD)
                AvgReadAllADCValues(&data);
+
+
+            
             StopLeftWheel();
             StopRightWheel(); 
             MoveClawDown();
-            turning = 0;
             //_delay_ms(1000);
             crossCount = 0;
             blackOn = 0;
             state = 0; 
+
             break;
 
          default:
             
             break;
-      }*/
+      }
    }
 } 
 
@@ -849,7 +855,7 @@ void OpenClaw()
 void FullyOpenClaw()
 {
    OpenClaw();
-   _delay_ms(4000);
+   _delay_ms(2000);
    StopClawOutput();
 }
 
@@ -864,7 +870,7 @@ void CloseClaw()
 void FullyCloseClaw()
 {
    CloseClaw();
-   _delay_ms(4000);
+   _delay_ms(2000);
    StopClawOutput();
 }
 
@@ -889,14 +895,14 @@ void LeftWheelReverse()
 
 void RightWheelForward()
 {
-    rightWheelState = RIGHT_WHEEL_FORWARD;/*
+    rightWheelState = RIGHT_WHEEL_REVERSE;/*
     rightWheelToggle = RIGHT_MOTOR_RED_WIRE;
     PORTB &= ~(RIGHT_MOTOR_BLACK_WIRE); */
 }
 
 void RightWheelReverse()
 {
-   rightWheelState = RIGHT_WHEEL_REVERSE;/*
+   rightWheelState = RIGHT_WHEEL_FORWARD;/*
    rightWheelToggle = RIGHT_MOTOR_BLACK_WIRE; 
    PORTB &= ~(RIGHT_MOTOR_RED_WIRE); */
 }
